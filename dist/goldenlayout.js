@@ -762,7 +762,13 @@ lm.LayoutManager.unminifyConfig = function (config) {
             this.transitionIndicator.destroy();
             this.eventHub.destroy();
 
-            this.removeAllDragSources();
+            this._dragSources.forEach(function (dragSource) {
+                dragSource._dragListener.destroy();
+                dragSource._element = null;
+                dragSource._itemConfig = null;
+                dragSource._dragListener = null;
+            });
+            this._dragSources = [];
         },
 
         /**
@@ -926,7 +932,9 @@ lm.LayoutManager.unminifyConfig = function (config) {
          * @param   {jQuery DOM element} element
          * @param   {Object|Function} itemConfig for the new item to be created, or a function which will provide it
          *
-         * @returns {void}
+         * @returns {DragSource}  an opaque object that identifies the DOM element
+         *          and the attached itemConfig. This can be used in
+         *          removeDragSource() later to get rid of the drag listeners.
          */
         createDragSource: function (element, itemConfig) {
             this.config.settings.constrainDragToContainer = false;
@@ -937,19 +945,16 @@ lm.LayoutManager.unminifyConfig = function (config) {
         },
 
         /**
-         +     * Remove All dragSources on this layout instance
-         +     *
-         +     * @public
-         +     * @returns {void}
-         +     */
-        removeAllDragSources: function () {
-            this._dragSources.forEach(function (dragSource) {
-                dragSource._dragListener.destroy();
-                dragSource._element = null;
-                dragSource._itemConfig = null;
-                dragSource._dragListener = null;
-            });
-            this._dragSources = [];
+         * Removes a DragListener added by createDragSource() so the corresponding
+         * DOM element is not a drag source any more.
+         *
+         * @param   {jQuery DOM element} element
+         *
+         * @returns {void}
+         */
+        removeDragSource: function (dragSource) {
+            dragSource.destroy();
+            lm.utils.removeFromArray(dragSource, this._dragSources);
         },
 
         /**
@@ -2251,51 +2256,70 @@ lm.utils.copy( lm.controls.DragProxy.prototype, {
  *
  * @constructor
  */
-lm.controls.DragSource = function( element, itemConfig, layoutManager ) {
-	this._element = element;
-	this._itemConfig = itemConfig;
-	this._layoutManager = layoutManager;
-	this._dragListener = null;
+lm.controls.DragSource = function (element, itemConfig, layoutManager) {
+    this._element = element;
+    this._itemConfig = itemConfig;
+    this._layoutManager = layoutManager;
+    this._dragListener = null;
 
-	this._createDragListener();
+    this._createDragListener();
 };
 
-lm.utils.copy( lm.controls.DragSource.prototype, {
+    lm.utils.copy(lm.controls.DragSource.prototype, {
 
-	/**
-	 * Called initially and after every drag
-	 *
-	 * @returns {void}
-	 */
-	_createDragListener: function() {
-		if( this._dragListener !== null ) {
-			this._dragListener.destroy();
-		}
+        /**
+         * Disposes of the drag listeners so the drag source is not usable any more.
+         *
+         * @returns {void}
+         */
+        destroy: function () {
+            this._removeDragListener();
+        },
 
-		this._dragListener = new lm.utils.DragListener( this._element );
-		this._dragListener.on( 'dragStart', this._onDragStart, this );
-		this._dragListener.on( 'dragStop', this._createDragListener, this );
-	},
+        /**
+         * Called initially and after every drag
+         *
+         * @returns {void}
+         */
+        _createDragListener: function () {
 
-	/**
-	 * Callback for the DragListener's dragStart event
-	 *
-	 * @param   {int} x the x position of the mouse on dragStart
-	 * @param   {int} y the x position of the mouse on dragStart
-	 *
-	 * @returns {void}
-	 */
-	_onDragStart: function( x, y ) {
-		var itemConfig = this._itemConfig;
-		if( lm.utils.isFunction( itemConfig ) ) {
-			itemConfig = itemConfig();
-		}
-		var contentItem = this._layoutManager._$normalizeContentItem( $.extend( true, {}, itemConfig ) ),
-			dragProxy = new lm.controls.DragProxy( x, y, this._dragListener, this._layoutManager, contentItem, null );
+            this._removeDragListener();
 
-		this._layoutManager.transitionIndicator.transitionElements( this._element, dragProxy.element );
-	}
-} );
+            this._dragListener = new lm.utils.DragListener(this._element);
+            this._dragListener.on('dragStart', this._onDragStart, this);
+            this._dragListener.on('dragStop', this._createDragListener, this);
+        },
+
+        /**
+         * Callback for the DragListener's dragStart event
+         *
+         * @param   {int} x the x position of the mouse on dragStart
+         * @param   {int} y the x position of the mouse on dragStart
+         *
+         * @returns {void}
+         */
+        _onDragStart: function (x, y) {
+            var itemConfig = this._itemConfig;
+            if (lm.utils.isFunction(itemConfig)) {
+                itemConfig = itemConfig();
+            }
+            var contentItem = this._layoutManager._$normalizeContentItem($.extend(true, {}, itemConfig)),
+                dragProxy = new lm.controls.DragProxy(x, y, this._dragListener, this._layoutManager, contentItem, null);
+
+            this._layoutManager.transitionIndicator.transitionElements(this._element, dragProxy.element);
+        },
+
+        /**
+         * Called after every drag and when the drag source is being disposed of.
+         *
+         * @returns {void}
+         */
+        _removeDragListener: function () {
+            if (this._dragListener !== null) {
+                this._dragListener.destroy();
+            }
+        }
+    });
 
 lm.controls.DropTargetIndicator = function() {
 	this.element = $( lm.controls.DropTargetIndicator._template );
